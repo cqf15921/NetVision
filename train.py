@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from models.lightguard_model import LightGuard
 from utils.dataset import TrafficDataset
@@ -9,7 +9,7 @@ import os
 
 
 def train():
-    # 1. 基本配置 [cite: 391, 392]
+    # 1. 基本配置
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     batch_size = 64
     learning_rate = 0.001
@@ -17,20 +17,18 @@ def train():
     save_path = './checkpoints'
     os.makedirs(save_path, exist_ok=True)
 
-    # 2. 加载数据集 [cite: 209]
-    # 注意：确保你已经运行了 preprocessing.py 生成了 npz 文件
-    dataset = TrafficDataset("data/processed/ustc_tfc2016_dataset.npz")
-    num_classes = dataset.get_num_classes()
+    # 2. 加载数据集
+    # 注意：这里分别加载 preprocessing.py 严格划分好的训练集和测试集
+    # 我们将测试集（_test.npz）作为训练过程中的验证集（val_loader）来监控性能
+    train_dataset = TrafficDataset("data/processed/ustc_tfc2016_dataset_train.npz")
+    val_dataset = TrafficDataset("data/processed/ustc_tfc2016_dataset_test.npz")
 
-    # 划分训练集和验证集 (论文未指定比例，通常采用 8:2 或使用其自带划分) [cite: 209, 377]
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    num_classes = train_dataset.get_num_classes()
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    # 3. 初始化模型、损失函数和优化器 [cite: 211, 392]
+    # 3. 初始化模型、损失函数和优化器
     model = LightGuard().to(device)
 
     # 动态调整输出层以匹配 USTC-TFC2016 的 20 个类别
@@ -41,8 +39,10 @@ def train():
 
     writer = SummaryWriter('./logs/lightguard_train')
 
-    # 4. 训练循环 [cite: 557]
+    # 4. 训练循环
     print(f"开始训练，设备: {device}, 类别数: {num_classes}")
+    print(f"训练集样本数: {len(train_dataset)}, 验证/测试集样本数: {len(val_dataset)}")
+
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
@@ -91,11 +91,11 @@ def train():
         writer.add_scalar('Accuracy/train', train_acc, epoch)
         writer.add_scalar('Accuracy/val', val_acc, epoch)
 
-        # 保存最佳模型
+        # 保存最新/最佳模型
         torch.save(model.state_dict(), os.path.join(save_path, 'lightguard_ustc.pth'))
 
     writer.close()
-    print("训练完成！")
+    print("训练完成！模型权重已保存至 checkpoints 目录。")
 
 
 if __name__ == "__main__":
