@@ -7,7 +7,7 @@ from sklearn.model_selection import train_test_split
 class LightGuardPreprocessor:
     def __init__(self, input_dir, output_idx_path, img_size=28, truncate_len=784):
         """
-        :param input_dir: 原始 pcap 文件夹路径 (例如 data/raw/ustc_tfc2016)
+        :param input_dir: 原始 pcap 文件夹路径 (例如 data/raw/USTC_TFC2016)
         :param output_idx_path: 转换后的 NPZ 文件基础保存路径
         :param img_size: 生成图像的尺寸 (28x28)
         :param truncate_len: 截断长度 (784字节，28*28=784)
@@ -129,7 +129,7 @@ class LightGuardPreprocessor:
 if __name__ == "__main__":
     # 使用示例
     # 假设你在项目根目录运行此脚本
-    raw_data_dir = "data/raw/ustc_tfc2016"
+    raw_data_dir = "data/raw/USTC_TFC2016"
     output_path = "data/processed/ustc_tfc2016_dataset.npz"
 
     print("=== 开始执行 LightGuard 流量预处理 ===")

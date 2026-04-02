@@ -47,7 +47,7 @@ class TrafficDataset(Dataset):
         return len(self.unique_labels)
 
 
-# 打印 ustc_tfc2016 的参考类别映射
+# 打印 USTC_TFC2016 的参考类别映射
 def get_ustc_mapping():
     return [
         "BitTorrent", "FaceTime", "FTP", "Gmail", "Mysql",

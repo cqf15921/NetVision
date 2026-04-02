@@ -13,7 +13,7 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     batch_size = 64
     learning_rate = 0.001
-    num_epochs = 15  # ustc_tfc2016 专用
+    num_epochs = 15  # USTC_TFC2016 专用
     save_path = './checkpoints'
     os.makedirs(save_path, exist_ok=True)
 
@@ -31,7 +31,7 @@ def train():
     # 3. 初始化模型、损失函数和优化器
     model = LightGuard().to(device)
 
-    # 动态调整输出层以匹配 ustc_tfc2016 的 20 个类别
+    # 动态调整输出层以匹配 USTC_TFC2016 的 20 个类别
     model.f1[2] = nn.Linear(256, num_classes).to(device)
 
     criterion = nn.CrossEntropyLoss()  # 交叉熵损失
