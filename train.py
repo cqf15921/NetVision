@@ -1,102 +1,161 @@
+import os
+import time
+import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from models.lightguard_model import LightGuard
-from utils.dataset import TrafficDataset
-import os
+
+# 导入你的模型和数据集加载类
+# (请确保这里的类名与你 models 和 utils 文件夹中的实际类名完全一致)
+from models.lightguard_model import LightGuard  # 如果你的模型类名不同，请修改这里
+from utils.dataset import LightGuardDataset  # 如果你的数据集类名不同，请修改这里
 
 
-def train():
-    # 1. 基本配置
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    batch_size = 64
-    learning_rate = 0.001
-    num_epochs = 15  # USTC_TFC2016 专用
-    save_path = './checkpoints'
-    os.makedirs(save_path, exist_ok=True)
+def main():
+    # ==========================================
+    # 1. 解析命令行参数
+    # ==========================================
+    parser = argparse.ArgumentParser(description="LightGuard 流量分类模型训练脚本")
 
-    # 2. 加载数据集
-    # 注意：这里分别加载 preprocessing.py 严格划分好的训练集和测试集
-    # 我们将测试集（_test.npz）作为训练过程中的验证集（val_loader）来监控性能
-    train_dataset = TrafficDataset("data/processed/ustc_tfc2016_dataset_train.npz")
-    val_dataset = TrafficDataset("data/processed/ustc_tfc2016_dataset_test.npz")
+    # 核心参数：选择数据集
+    parser.add_argument('--dataset', type=str, default='USTC_TFC2016',
+                        choices=['USTC_TFC2016', 'CIC_IoT_2023', 'ToN-IoT'],
+                        help='选择要训练的数据集')
 
-    num_classes = train_dataset.get_num_classes()
+    # 超参数配置
+    parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
+    parser.add_argument('--epochs', type=int, default=50, help='训练轮数')
+    parser.add_argument('--lr', type=float, default=0.001, help='学习率')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='训练设备')
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    args = parser.parse_args()
 
+    print(f"=== 初始化 LightGuard 训练 ===")
+    print(f"[*] 目标数据集: {args.dataset}")
+    print(f"[*] 训练设备:   {args.device.upper()}")
+    print(f"[*] 超参数:     Epochs={args.epochs}, Batch_Size={args.batch_size}, LR={args.lr}")
+
+    # ==========================================
+    # 2. 准备数据和目录
+    # ==========================================
+    processed_dir = "data/processed"
+    checkpoint_dir = "checkpoints"
+    log_dir = f"logs/lightguard_{args.dataset.lower()}_{int(time.time())}"
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+
+    # 实例化 Dataset
+    # 注意：你的 utils/dataset.py 需要能够接收 dataset_name 参数来加载不同名称的 .npz
+    print("[*] 正在加载数据集...")
+    train_dataset = LightGuardDataset(data_dir=processed_dir, dataset_name=args.dataset, is_train=True)
+    test_dataset = LightGuardDataset(data_dir=processed_dir, dataset_name=args.dataset, is_train=False)
+
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+
+    # 动态获取当前数据集的类别数量
+    # (假设你的 dataset 内部有 classes 或 label_to_idx 属性)
+    if hasattr(train_dataset, 'label_to_idx'):
+        num_classes = len(train_dataset.label_to_idx)
+    else:
+        # 如果没有该属性，尝试从数据中获取唯一标签数
+        num_classes = len(set(train_dataset.labels))
+    print(f"[+] 数据集加载完成！训练集大小: {len(train_dataset)}, 类别数: {num_classes}")
+
+    # ==========================================
     # 3. 初始化模型、损失函数和优化器
-    model = LightGuard().to(device)
+    # ==========================================
+    model = LightGuard(num_classes=num_classes).to(args.device)
 
-    # 动态调整输出层以匹配 USTC_TFC2016 的 20 个类别
-    model.f1[2] = nn.Linear(256, num_classes).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    criterion = nn.CrossEntropyLoss()  # 交叉熵损失
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)  # Adam 优化器
+    # 初始化 TensorBoard
+    writer = SummaryWriter(log_dir=log_dir)
 
-    writer = SummaryWriter('./logs/lightguard_train')
+    # ==========================================
+    # 4. 训练与验证循环
+    # ==========================================
+    best_acc = 0.0
+    model_save_path = os.path.join(checkpoint_dir, f"lightguard_{args.dataset.lower()}.pth")
 
-    # 4. 训练循环
-    print(f"开始训练，设备: {device}, 类别数: {num_classes}")
-    print(f"训练集样本数: {len(train_dataset)}, 验证/测试集样本数: {len(val_dataset)}")
-
-    for epoch in range(num_epochs):
+    print("\n=== 开始训练 ===")
+    for epoch in range(args.epochs):
         model.train()
         running_loss = 0.0
-        correct = 0
-        total = 0
+        correct_train = 0
+        total_train = 0
 
-        for i, (images, labels) in enumerate(train_loader):
-            images, labels = images.to(device), labels.to(device)
+        for i, (inputs, labels) in enumerate(train_loader):
+            inputs, labels = inputs.to(args.device, dtype=torch.float32), labels.to(args.device, dtype=torch.long)
+
+            # 梯度清零
+            optimizer.zero_grad()
 
             # 前向传播
-            outputs = model(images)
+            outputs = model(inputs)
             loss = criterion(outputs, labels)
 
-            # 反向传播和优化
-            optimizer.zero_grad()
+            # 反向传播与优化
             loss.backward()
             optimizer.step()
 
+            # 统计指标
             running_loss += loss.item()
             _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
+            total_train += labels.size(0)
+            correct_train += (predicted == labels).sum().item()
 
-        train_acc = 100 * correct / total
-        avg_loss = running_loss / len(train_loader)
+        train_acc = 100 * correct_train / total_train
+        train_loss = running_loss / len(train_loader)
 
-        # 验证阶段
+        # -------------------
+        # 验证阶段 (测试集)
+        # -------------------
         model.eval()
-        val_correct = 0
-        val_total = 0
+        correct_test = 0
+        total_test = 0
+        val_loss = 0.0
+
         with torch.no_grad():
-            for images, labels in val_loader:
-                images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
+            for inputs, labels in test_loader:
+                inputs, labels = inputs.to(args.device, dtype=torch.float32), labels.to(args.device, dtype=torch.long)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+
+                val_loss += loss.item()
                 _, predicted = torch.max(outputs.data, 1)
-                val_total += labels.size(0)
-                val_correct += (predicted == labels).sum().item()
+                total_test += labels.size(0)
+                correct_test += (predicted == labels).sum().item()
 
-        val_acc = 100 * val_correct / val_total
-
-        print(
-            f'Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}, Train Acc: {train_acc:.2f}%, Val Acc: {val_acc:.2f}%')
+        test_acc = 100 * correct_test / total_test
+        val_loss = val_loss / len(test_loader)
 
         # 记录日志
-        writer.add_scalar('Loss/train', avg_loss, epoch)
-        writer.add_scalar('Accuracy/train', train_acc, epoch)
-        writer.add_scalar('Accuracy/val', val_acc, epoch)
+        print(f"Epoch [{epoch + 1}/{args.epochs}] "
+              f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
+              f"Val Loss: {val_loss:.4f}, Val Acc: {test_acc:.2f}%")
 
-        # 保存最新/最佳模型
-        torch.save(model.state_dict(), os.path.join(save_path, 'lightguard_ustc.pth'))
+        writer.add_scalar('Loss/Train', train_loss, epoch)
+        writer.add_scalar('Loss/Validation', val_loss, epoch)
+        writer.add_scalar('Accuracy/Train', train_acc, epoch)
+        writer.add_scalar('Accuracy/Validation', test_acc, epoch)
 
+        # -------------------
+        # 保存最佳模型权重
+        # -------------------
+        if test_acc > best_acc:
+            best_acc = test_acc
+            torch.save(model.state_dict(), model_save_path)
+            print(f"    [!] 发现最佳模型 (Acc: {best_acc:.2f}%)，已保存至 {model_save_path}")
+
+    print("=== 训练结束 ===")
+    print(f"最高测试集准确率: {best_acc:.2f}%")
     writer.close()
-    print("训练完成！模型权重已保存至 checkpoints 目录。")
 
 
 if __name__ == "__main__":
-    train()
+    main()
