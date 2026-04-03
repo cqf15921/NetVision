@@ -190,7 +190,8 @@ def process_ton_iot_csv(raw_dir, output_dir):
     images = tabular_to_image(X_raw)
 
     print("正在按 8:2 划分 ToN-IoT 数据集...")
-    X_train, X_test, y_train, y_test = train_test_split(images, images, test_size=0.2, random_state=42, stratify=labels)
+    # 【核心修复】：已将原有的 train_test_split(images, images, ...) 修正为 images, labels
+    X_train, X_test, y_train, y_test = train_test_split(images, labels, test_size=0.2, random_state=42, stratify=labels)
 
     train_path = os.path.join(output_dir, 'ton_iot_dataset_train.npz')
     test_path = os.path.join(output_dir, 'ton_iot_dataset_test.npz')

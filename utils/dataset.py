@@ -12,9 +12,10 @@ class LightGuardDataset(Dataset):
         :param is_train: True 加载训练集，False 加载测试集
         :param transform: PyTorch 图像变换
         """
-        # 动态拼接文件名 (小写化以匹配 preprocessing.py 的输出)
+        # 动态拼接文件名 (小写化并将连字符替换为下划线，以匹配 preprocessing.py 的输出)
+        # 这一步修复了加载 ToN-IoT 数据集时文件名不匹配的问题
         mode = "train" if is_train else "test"
-        npz_filename = f"{dataset_name.lower()}_dataset_{mode}.npz"
+        npz_filename = f"{dataset_name.lower().replace('-', '_')}_dataset_{mode}.npz"
         npz_path = os.path.join(data_dir, npz_filename)
 
         if not os.path.exists(npz_path):

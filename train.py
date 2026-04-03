@@ -8,9 +8,8 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 # 导入你的模型和数据集加载类
-# (请确保这里的类名与你 models 和 utils 文件夹中的实际类名完全一致)
-from models.lightguard_model import LightGuard  # 如果你的模型类名不同，请修改这里
-from utils.dataset import LightGuardDataset  # 如果你的数据集类名不同，请修改这里
+from models.lightguard_model import LightGuard
+from utils.dataset import LightGuardDataset
 
 
 def main():
@@ -42,33 +41,38 @@ def main():
     # ==========================================
     processed_dir = "data/processed"
     checkpoint_dir = "checkpoints"
-    log_dir = f"logs/lightguard_{args.dataset.lower()}_{int(time.time())}"
+    # 将可能存在的连字符(如ToN-IoT)替换为下划线，防止命名不规范
+    safe_dataset_name = args.dataset.lower().replace('-', '_')
+    log_dir = f"logs/lightguard_{safe_dataset_name}_{int(time.time())}"
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
 
     # 实例化 Dataset
-    # 注意：你的 utils/dataset.py 需要能够接收 dataset_name 参数来加载不同名称的 .npz
     print("[*] 正在加载数据集...")
-    train_dataset = LightGuardDataset(data_dir=processed_dir, dataset_name=args.dataset, is_train=True)
-    test_dataset = LightGuardDataset(data_dir=processed_dir, dataset_name=args.dataset, is_train=False)
+    try:
+        train_dataset = LightGuardDataset(data_dir=processed_dir, dataset_name=args.dataset, is_train=True)
+        test_dataset = LightGuardDataset(data_dir=processed_dir, dataset_name=args.dataset, is_train=False)
+    except FileNotFoundError as e:
+        print(f"[!] 报错: {e}")
+        print("[!] 请先运行 utils/preprocessing.py 生成对应的 .npz 数据文件！")
+        return
 
+    # num_workers=4 可以加速数据加载，如果你在 Windows 下报错，可以改为 num_workers=0
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
 
     # 动态获取当前数据集的类别数量
-    # (假设你的 dataset 内部有 classes 或 label_to_idx 属性)
-    if hasattr(train_dataset, 'label_to_idx'):
-        num_classes = len(train_dataset.label_to_idx)
-    else:
-        # 如果没有该属性，尝试从数据中获取唯一标签数
-        num_classes = len(set(train_dataset.labels))
+    num_classes = train_dataset.get_num_classes()
     print(f"[+] 数据集加载完成！训练集大小: {len(train_dataset)}, 类别数: {num_classes}")
 
     # ==========================================
     # 3. 初始化模型、损失函数和优化器
     # ==========================================
-    model = LightGuard(num_classes=num_classes).to(args.device)
+    model = LightGuard().to(args.device)
+
+    # 【核心修复】：动态修改最后一层 (f1 的第3个元素) 以适配不同数据集的类别数量
+    model.f1[2] = nn.Linear(256, num_classes).to(args.device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -80,7 +84,7 @@ def main():
     # 4. 训练与验证循环
     # ==========================================
     best_acc = 0.0
-    model_save_path = os.path.join(checkpoint_dir, f"lightguard_{args.dataset.lower()}.pth")
+    model_save_path = os.path.join(checkpoint_dir, f"lightguard_{safe_dataset_name}.pth")
 
     print("\n=== 开始训练 ===")
     for epoch in range(args.epochs):
