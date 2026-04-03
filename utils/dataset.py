@@ -1,26 +1,36 @@
+import os
 import torch
 from torch.utils.data import Dataset
 import numpy as np
 from torchvision import transforms
 
+class LightGuardDataset(Dataset):
+    def __init__(self, data_dir, dataset_name="USTC_TFC2016", is_train=True, transform=None):
+        """
+        :param data_dir: 预处理数据的根目录 (如 'data/processed')
+        :param dataset_name: 数据集名称
+        :param is_train: True 加载训练集，False 加载测试集
+        :param transform: PyTorch 图像变换
+        """
+        # 动态拼接文件名 (小写化以匹配 preprocessing.py 的输出)
+        mode = "train" if is_train else "test"
+        npz_filename = f"{dataset_name.lower()}_dataset_{mode}.npz"
+        npz_path = os.path.join(data_dir, npz_filename)
 
-class TrafficDataset(Dataset):
-    def __init__(self, npz_path, transform=None):
-        """
-        :param npz_path: 预处理生成的 .npz 文件路径
-        :param transform: PyTorch 图像变换 (例如 ToTensor)
-        """
-        # 加载预处理后的数据 [cite: 208]
+        if not os.path.exists(npz_path):
+            raise FileNotFoundError(f"[!] 找不到数据集文件: {npz_path}。请确认是否已运行 preprocessing.py")
+
+        # 加载预处理后的数据
         data = np.load(npz_path, allow_pickle=True)
         self.images = data['images']
         self.labels_name = data['labels']
 
-        # 获取所有唯一的类别名称并排序，建立名称到索引的映射
+        # 动态获取所有唯一的类别名称并排序，建立名称到索引的映射
         self.unique_labels = sorted(list(set(self.labels_name)))
         self.label_to_idx = {name: i for i, name in enumerate(self.unique_labels)}
         self.idx_to_label = {i: name for name, i in self.label_to_idx.items()}
 
-        # 默认变换：转换为张量并归一化到 [0, 1]
+        # 默认变换：转换为张量并归一化
         self.transform = transform if transform else transforms.Compose([
             transforms.ToTensor(),
         ])
@@ -32,10 +42,8 @@ class TrafficDataset(Dataset):
         image = self.images[idx]
         label_name = self.labels_name[idx]
 
-        # 将图像转换为 PIL Image 格式以便 transform 处理
-        # 图像已截断为 784 字节并重塑为 28x28 [cite: 392, 401]
         if self.transform:
-            # 增加通道维度 (H, W) -> (H, W, 1)
+            # 增加通道维度 (H, W) -> (H, W, 1) 以适配 ToTensor
             image = image[:, :, np.newaxis]
             image = self.transform(image)
 
@@ -43,29 +51,5 @@ class TrafficDataset(Dataset):
         return image, torch.tensor(label, dtype=torch.long)
 
     def get_num_classes(self):
-        """返回类别总数，用于修改模型输出层"""
+        """返回当前数据集的类别总数"""
         return len(self.unique_labels)
-
-
-# 打印 USTC_TFC2016 的参考类别映射
-def get_ustc_mapping():
-    return [
-        "BitTorrent", "FaceTime", "FTP", "Gmail", "Mysql",
-        "Outlook", "Skype", "SMB", "Weibo", "World",  # 良性
-        "Cridex", "Geodo", "Htbot", "Miuref", "Neris",
-        "Nsis", "Shifu", "Tinba", "Virut", "Zeus"  # 恶意
-    ]
-
-
-if __name__ == "__main__":
-    # 测试代码
-    try:
-        dataset = TrafficDataset("data/processed/ustc_tfc2016_dataset.npz")
-        print(f"成功加载数据集，样本数: {len(dataset)}")
-        print(f"类别总数: {dataset.get_num_classes()}")
-        print(f"类别映射示例: {dataset.label_to_idx}")
-
-        img, label = dataset[0]
-        print(f"单张图像形状: {img.shape}, 标签索引: {label}")
-    except Exception as e:
-        print(f"测试失败（请先运行 preprocessing.py）: {e}")
