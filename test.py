@@ -12,11 +12,16 @@ from utils.dataset import LightGuardDataset
 
 
 def test():
+    # ==========================================
     # 1. 命令行参数解析
+    # ==========================================
     parser = argparse.ArgumentParser(description="LightGuard 模型测试与评估脚本")
+
+    # 核心参数：选择要评估的数据集 (已更新为最新的 PCAP 数据集列表)
     parser.add_argument('--dataset', type=str, default='USTC_TFC2016',
-                        choices=['USTC_TFC2016', 'CIC_IoT_2023', 'ToN-IoT'],
+                        choices=['USTC_TFC2016', 'ENTA_Datase', 'ToN-IoT'],
                         help='选择要评估的数据集')
+
     parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -24,19 +29,27 @@ def test():
 
     print(f"=== 开始在 {args.dataset} 上评估 LightGuard ===")
 
+    # ==========================================
     # 2. 加载测试集
+    # ==========================================
     processed_dir = "data/processed"
     try:
         test_dataset = LightGuardDataset(data_dir=processed_dir, dataset_name=args.dataset, is_train=False)
     except FileNotFoundError as e:
-        print(e)
+        print(f"[!] 报错: {e}")
+        print("[!] 未找到测试集数据，请先运行 utils/preprocessing.py 生成对应的 .npz 文件！")
         return
 
     num_classes = test_dataset.get_num_classes()
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
+    # ==========================================
     # 3. 动态加载模型与权重
-    model_path = f'./checkpoints/lightguard_{args.dataset.lower()}.pth'
+    # ==========================================
+    # 统一规范化名字，与 train.py 的保存逻辑保持一致
+    safe_dataset_name = args.dataset.lower().replace('-', '_')
+    model_path = f'./checkpoints/lightguard_{safe_dataset_name}.pth'
+
     model = LightGuard().to(args.device)
 
     # 动态适配输出层类别数
@@ -46,7 +59,8 @@ def test():
         model.load_state_dict(torch.load(model_path, map_location=args.device))
         print(f"[*] 成功加载模型权重: {model_path}")
     else:
-        print(f"[!] 未找到模型权重文件: {model_path}。请先执行 train.py 进行训练！")
+        print(f"[!] 未找到模型权重文件: {model_path}")
+        print(f"[!] 请先执行: python train.py --dataset {args.dataset} 进行训练！")
         return
 
     model.eval()
@@ -54,6 +68,7 @@ def test():
     # =====================================================================
     # 4. 计算模型的学术指标：FLOPs (计算复杂度) 和 Parameters (参数量)
     # =====================================================================
+    # 构造假输入：(BatchSize, Channels, Height, Width) -> 对应 784 字节的 28x28 灰度图
     dummy_input = torch.randn(1, 1, 28, 28).to(args.device)
     flops, params = profile(model, inputs=(dummy_input,), verbose=False)
 
@@ -69,7 +84,7 @@ def test():
     all_preds = []
     all_labels = []
 
-    print("[*] 开始执行推理...")
+    print(f"[*] 开始在 {args.dataset} 测试集上执行推理...")
     start_time = time.time()
 
     with torch.no_grad():

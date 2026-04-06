@@ -18,14 +18,14 @@ def main():
     # ==========================================
     parser = argparse.ArgumentParser(description="LightGuard 流量分类模型训练脚本")
 
-    # 核心参数：选择数据集
+    # 核心参数：选择数据集 (已更新为完全对齐论文的 PCAP 数据集)
     parser.add_argument('--dataset', type=str, default='USTC_TFC2016',
-                        choices=['USTC_TFC2016', 'CIC_IoT_2023', 'ToN-IoT'],
+                        choices=['USTC_TFC2016', 'ENTA_Datase', 'ToN-IoT'],
                         help='选择要训练的数据集')
 
     # 超参数配置
     parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
-    parser.add_argument('--epochs', type=int, default=50, help='训练轮数')
+    parser.add_argument('--epochs', type=int, default=10, help='训练轮数')
     parser.add_argument('--lr', type=float, default=0.001, help='学习率')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='训练设备')
 
@@ -41,6 +41,7 @@ def main():
     # ==========================================
     processed_dir = "data/processed"
     checkpoint_dir = "checkpoints"
+
     # 将可能存在的连字符(如ToN-IoT)替换为下划线，防止命名不规范
     safe_dataset_name = args.dataset.lower().replace('-', '_')
     log_dir = f"logs/lightguard_{safe_dataset_name}_{int(time.time())}"
