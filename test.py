@@ -7,15 +7,16 @@ import os
 import argparse
 from thop import profile  # 用于计算 FLOPs 和 参数量
 
-from models.lightguard_model import LightGuard
-from utils.dataset import LightGuardDataset
+# 导入你的模型和数据集加载类 (已更新为 NetVision)
+from models.netvision_model import NetVision
+from utils.dataset import NetVisionDataset
 
 
 def test():
     # ==========================================
     # 1. 命令行参数解析
     # ==========================================
-    parser = argparse.ArgumentParser(description="LightGuard 模型测试与评估脚本")
+    parser = argparse.ArgumentParser(description="NetVision 模型测试与评估脚本")
 
     # 核心参数：选择要评估的数据集 (已更新为最新的 PCAP 数据集列表)
     parser.add_argument('--dataset', type=str, default='USTC_TFC2016',
@@ -27,14 +28,14 @@ def test():
 
     args = parser.parse_args()
 
-    print(f"=== 开始在 {args.dataset} 上评估 LightGuard ===")
+    print(f"=== 开始在 {args.dataset} 上评估 NetVision ===")
 
     # ==========================================
     # 2. 加载测试集
     # ==========================================
     processed_dir = "data/processed"
     try:
-        test_dataset = LightGuardDataset(data_dir=processed_dir, dataset_name=args.dataset, is_train=False)
+        test_dataset = NetVisionDataset(data_dir=processed_dir, dataset_name=args.dataset, is_train=False)
     except FileNotFoundError as e:
         print(f"[!] 报错: {e}")
         print("[!] 未找到测试集数据，请先运行 utils/preprocessing.py 生成对应的 .npz 文件！")
@@ -48,9 +49,11 @@ def test():
     # ==========================================
     # 统一规范化名字，与 train.py 的保存逻辑保持一致
     safe_dataset_name = args.dataset.lower().replace('-', '_')
-    model_path = f'./checkpoints/lightguard_{safe_dataset_name}.pth'
 
-    model = LightGuard().to(args.device)
+    # 读取的权重文件名前缀更新为 netvision
+    model_path = f'./checkpoints/netvision_{safe_dataset_name}.pth'
+
+    model = NetVision().to(args.device)
 
     # 动态适配输出层类别数
     model.f1[2] = nn.Linear(256, num_classes).to(args.device)

@@ -96,9 +96,9 @@ class LRBBlock(nn.Module):
         return out
 
 
-class LightGuard(nn.Module):
+class NetVision(nn.Module):
     def __init__(self):
-        super(LightGuard, self).__init__()
+        super(NetVision, self).__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1, stride=2),
             nn.BatchNorm2d(32),
@@ -141,6 +141,6 @@ class LightGuard(nn.Module):
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LightGuard().to(device)
+    model = NetVision().to(device)
     # 将测试输入尺寸改为 (1, 28, 28) 以匹配 784 字节的截断长度
     print(summary(model, (1, 28, 28)))

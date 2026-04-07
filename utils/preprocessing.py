@@ -6,7 +6,7 @@ from scapy.all import rdpcap, IP
 from sklearn.model_selection import train_test_split
 
 
-class LightGuardPreprocessor:
+class NetVisionPreprocessor:
     def __init__(self, input_dir, output_idx_path, dataset_name, img_size=28, truncate_len=784):
         self.input_dir = input_dir
         self.output_idx_path = output_idx_path
@@ -143,7 +143,7 @@ if __name__ == "__main__":
         safe_ds_name = ds_name.lower().replace('-', '_')
         output_path = os.path.join(BASE_PROCESSED_DIR, f"{safe_ds_name}_dataset.npz")
 
-        preprocessor = LightGuardPreprocessor(raw_data_dir, output_path, dataset_name=ds_name)
+        preprocessor = NetVisionPreprocessor(raw_data_dir, output_path, dataset_name=ds_name)
         imgs, lbls = preprocessor.pcap_to_images()
 
         if len(imgs) > 0:

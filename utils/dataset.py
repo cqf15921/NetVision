@@ -4,7 +4,7 @@ from torch.utils.data import Dataset
 import numpy as np
 from torchvision import transforms
 
-class LightGuardDataset(Dataset):
+class NetVisionDataset(Dataset):
     def __init__(self, data_dir, dataset_name="USTC_TFC2016", is_train=True, transform=None):
         """
         :param data_dir: 预处理数据的根目录 (如 'data/processed')
