@@ -95,7 +95,7 @@ class NetVisionPreprocessor:
 
                             src = net_layer.src
                             dst = net_layer.dst
-                            proto = net_layer.proto
+                            proto = net_layer.proto if has_ip4 else net_layer.nh
                             sport, dport = 0, 0
 
                             if pkt.haslayer(TCP):
