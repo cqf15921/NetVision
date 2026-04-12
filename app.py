@@ -2,6 +2,8 @@ import gradio as gr
 import subprocess
 import os
 import time
+import shutil
+import psutil  # 必须安装: pip install psutil
 
 # ==========================================
 # 全局进程追踪器 (用于精准强杀任务)
@@ -13,6 +15,20 @@ active_processes = {
 }
 
 
+def kill_process_tree(pid):
+    """递归强杀指定 PID 及其所有子进程，解决 Shell 模式下停不掉的问题"""
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            child.kill()  # 强杀所有子进程（如 Python 训练进程）
+        parent.kill()  # 强杀父进程（如 Shell 壳）
+    except psutil.NoSuchProcess:
+        pass
+    except Exception as e:
+        print(f"清理进程树时出错: {e}")
+
+
 def stream_command(cmd, task_name):
     """执行命令行指令，实时捕获日志并绑定到全局进程追踪器"""
     process = subprocess.Popen(
@@ -22,7 +38,6 @@ def stream_command(cmd, task_name):
 
     output_log = ""
     try:
-        # 逐行读取输出流，实现进度条实时滚动
         for line in iter(process.stdout.readline, ''):
             output_log += line
             yield output_log
@@ -35,21 +50,40 @@ def stream_command(cmd, task_name):
 # ==========================================
 # 模块一：预处理与训练回调函数
 # ==========================================
-def run_preprocessing(upload_file, default_dataset):
+def run_preprocessing(upload_dir, default_dataset, max_packets):
+    """执行预处理，支持文件夹上传和采样上限设置"""
     target_ds = default_dataset if default_dataset else "CIC_IoT_2023"
-    cmd = f"python utils/preprocessing.py --dataset {target_ds}"
 
-    yield f"🚀 正在准备预处理数据集: {target_ds}...\n"
+    if upload_dir is not None:
+        raw_dir = f"data/raw/{target_ds}"
+        os.makedirs(raw_dir, exist_ok=True)
+        yield f"📁 检测到上传内容，正在同步文件至 {target_ds} 原始数据目录...\n"
+
+        file_list = upload_dir if isinstance(upload_dir, list) else [upload_dir]
+        valid_files = 0
+        for file_obj in file_list:
+            file_path = getattr(file_obj, 'name', str(file_obj))
+            if file_path.lower().endswith(('.pcap', '.pcapng')):
+                try:
+                    shutil.copy(file_path, raw_dir)
+                    valid_files += 1
+                except Exception:
+                    pass
+        yield f"✅ 成功导入 {valid_files} 个流量包文件。\n"
+
+    # 将采样上限参数传递给后台脚本
+    cmd = f"python utils/preprocessing.py --dataset {target_ds} --max_packets {int(max_packets)}"
+    yield f"🚀 正在启动预处理引擎 (采样上限: {int(max_packets) if max_packets > 0 else '全量读取'})...\n"
     for log in stream_command(cmd, "preprocess"):
         yield log
-    yield log + "\n\n✅ 预处理任务运行结束。"
+    yield log + "\n\n✅ 预处理任务结束。"
 
 
 def stop_preprocessing():
     p = active_processes.get("preprocess")
     if p and p.poll() is None:
-        p.terminate()  # 发送系统级 SIGTERM 强杀进程
-        return "🛑 [警告] 预处理任务已被手动强制终止！相关内存已释放。"
+        kill_process_tree(p.pid)
+        return "🛑 [强力终止] 预处理任务已强制停止，后台进程已清理。"
     return "⚠️ 当前没有正在运行的预处理任务。"
 
 
@@ -60,19 +94,19 @@ def run_training(dataset_choice, batch_size, epochs):
     yield f"🚀 正在启动 NetVision 训练引擎...\n数据集: {target_ds} | Epochs: {epochs}\n"
     for log in stream_command(cmd, "train"):
         yield log
-    yield log + "\n\n✅ 训练任务运行结束。"
+    yield log + "\n\n✅ 训练任务结束。"
 
 
 def stop_training():
     p = active_processes.get("train")
     if p and p.poll() is None:
-        p.terminate()
-        return "🛑 [警告] 模型训练已被手动强制终止！"
+        kill_process_tree(p.pid)
+        return "🛑 [强力终止] 模型训练已强制停止，算力资源已释放。"
     return "⚠️ 当前没有正在运行的训练任务。"
 
 
 def get_latest_model(dataset_choice):
-    """获取训练好的模型路径供下载"""
+    """获取训练生成的最佳模型权重文件"""
     target_ds = dataset_choice.lower().replace('-', '_')
     model_path = f"checkpoints/netvision_{target_ds}.pth"
     if os.path.exists(model_path):
@@ -83,22 +117,21 @@ def get_latest_model(dataset_choice):
 # ==========================================
 # 模块二：恶意流量检测回调函数
 # ==========================================
-def run_detection(test_pcap, model_file, dataset_choice):
+def run_detection(test_file, model_file, dataset_choice):
     yield "🔎 正在初始化 NetVision 流量检测引擎...\n"
-    time.sleep(1)  # 模拟加载停顿
+    time.sleep(1)
 
     target_ds = dataset_choice if dataset_choice else "CIC_IoT_2023"
     cmd = f"python test.py --dataset {target_ds}"
 
-    yield f"[*] 已加载模型权重文件: {model_file.name if model_file else '默认最佳缓存权重'}\n"
-    yield f"[*] 正在分析目标流量特征...\n"
+    yield f"[*] 检测规范: {target_ds}\n"
+    yield f"[*] 正在分析目标流量特征并生成报告...\n"
 
     final_log = ""
     for log in stream_command(cmd, "detect"):
         final_log = log
         yield log
-
-    yield final_log + "\n\n✅ 检测完毕！请查看上方详细分类报告。"
+    yield final_log + "\n\n✅ 检测完毕！"
 
 
 # ==========================================
@@ -110,85 +143,75 @@ with gr.Blocks(title="NetVision 物联网恶意流量检测系统", theme=theme)
     gr.Markdown(
         """
         # 🛡️ NetVision 基于流量图像的轻量级物联网恶意流量检测系统
+        基于轻量级神经网络 (GhostModule & 分组卷积) 的 IoT 异常流量识别与防御平台
         """
     )
 
-    # ---------------------------------------------------------
-    # 选项卡 1：数据预处理与模型训练
-    # ---------------------------------------------------------
     with gr.Tab("⚙️ 数据预处理与训练模块"):
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### 1. 数据集配置")
-                upload_dataset = gr.File(label="上传自选数据集 (PCAP)", file_types=[".pcap", ".pcapng", ".zip"])
+                upload_dataset = gr.File(label="📂 上传包含流量包的文件夹", file_count="directory")
                 default_dataset = gr.Dropdown(
                     choices=["CIC_IoT_2023", "USTC_TFC2016", "ToN-IoT"],
                     value="CIC_IoT_2023",
-                    label="使用系统内置预处理数据集"
+                    label="使用系统内置数据集"
                 )
 
-                gr.Markdown("### 2. 模型训练超参数")
-                batch_size = gr.Slider(minimum=16, maximum=256, step=16, value=64, label="Batch Size (批次大小)")
-                epochs = gr.Slider(minimum=1, maximum=50, step=1, value=10, label="Epochs (训练轮数)")
+                # 采样包数控制滑动条
+                max_pkts = gr.Slider(minimum=0, maximum=1000000, step=50000, value=300000,
+                                     label="每个文件读取上限 (0 表示全量读取)")
 
-                # 按钮区域布局优化
                 with gr.Row():
                     btn_preprocess = gr.Button("🛠️ 开始预处理", variant="primary")
                     btn_stop_prep = gr.Button("🛑 终止预处理", variant="stop")
+
+                gr.Markdown("### 2. 模型训练超参数")
+                batch_size = gr.Slider(minimum=16, maximum=256, step=16, value=64, label="Batch Size")
+                epochs = gr.Slider(minimum=1, maximum=50, step=1, value=10, label="Epochs")
+
                 with gr.Row():
                     btn_train = gr.Button("🚀 开始训练模型", variant="primary")
                     btn_stop_train = gr.Button("🛑 终止模型训练", variant="stop")
 
-                with gr.Row():
-                    btn_get_model = gr.Button("🔄 手动刷新并提取最新模型", variant="secondary")
-                # 设为 interactive=False 变成纯粹的下载框
-                download_model = gr.File(label="💾 提取成功后，点击下方出现的文件卡片即可下载 (.pth)", interactive=False)
+                btn_get_model = gr.Button("🔄 手动刷新并提取最新模型", variant="secondary")
+                download_model = gr.File(label="💾 点击下方文件卡片下载权重 (.pth)", interactive=False)
 
             with gr.Column(scale=2):
                 gr.Markdown("### 实时运行监控台")
-                train_log = gr.Textbox(label="系统日志与执行进度", lines=22, max_lines=25, interactive=False)
+                train_log = gr.Textbox(label="系统日志与进度", lines=22, max_lines=25, interactive=False)
 
-        # ---------------- 事件绑定逻辑 ----------------
-        # 预处理事件
-        prep_event = btn_preprocess.click(fn=run_preprocessing, inputs=[upload_dataset, default_dataset],
+        # 绑定事件逻辑
+        prep_event = btn_preprocess.click(fn=run_preprocessing, inputs=[upload_dataset, default_dataset, max_pkts],
                                           outputs=[train_log])
-        # 点击终止时：1.强杀后端进程 2.取消前端(cancels)监听防止卡死
         btn_stop_prep.click(fn=stop_preprocessing, inputs=None, outputs=[train_log], cancels=[prep_event])
 
-        # 1. 启动训练事件
         train_event = btn_train.click(fn=run_training, inputs=[default_dataset, batch_size, epochs],
                                       outputs=[train_log])
-        # 2. 强杀进程事件
         btn_stop_train.click(fn=stop_training, inputs=None, outputs=[train_log], cancels=[train_event])
 
-        # 3. 【核心修复】使用 .then() 确保训练任务完全跑完后，再自动提取模型
+        # 链式调用确保训练后自动提取
         train_event.then(fn=get_latest_model, inputs=[default_dataset], outputs=[download_model])
-        # 4. 绑定我们新加的手动提取按钮
         btn_get_model.click(fn=get_latest_model, inputs=[default_dataset], outputs=[download_model])
 
-    # ---------------------------------------------------------
-    # 选项卡 2：恶意流量检测模块
-    # ---------------------------------------------------------
     with gr.Tab("🔎 恶意流量检测模块"):
         with gr.Row():
             with gr.Column(scale=1):
-                gr.Markdown("### 上传检测数据与环境配置")
-                upload_pcap = gr.File(label="上传待检测的网络测试集 (.npz/.pcap)")
-                upload_model = gr.File(label="上传自定义模型权重 (.pth) [留空则使用默认最新权重]")
+                gr.Markdown("### 配置检测环境")
+                upload_test = gr.File(label="上传待检测测试集 (.npz/.pcap)")
+                upload_weight = gr.File(label="上传自定义权重 (.pth)")
                 target_env = gr.Dropdown(
                     choices=["CIC_IoT_2023", "USTC_TFC2016", "ToN-IoT"],
                     value="CIC_IoT_2023",
-                    label="选择检测环境规范 (严格匹配特征维度)"
+                    label="选择检测规范"
                 )
-
-                btn_detect = gr.Button("🚨 启动流量检测", variant="primary")
+                btn_detect = gr.Button("🚨 启动流量检测识别", variant="primary")
 
             with gr.Column(scale=2):
-                gr.Markdown("### 深度包检测 (DPI) 结果报告")
-                detect_log = gr.Textbox(label="检测进度与安全研判报告", lines=20, max_lines=25, interactive=False)
+                gr.Markdown("### 识别结果报告")
+                detect_log = gr.Textbox(label="检测进度与安全研判", lines=20, max_lines=25, interactive=False)
 
-        btn_detect.click(fn=run_detection, inputs=[upload_pcap, upload_model, target_env], outputs=[detect_log])
+        btn_detect.click(fn=run_detection, inputs=[upload_test, upload_weight, target_env], outputs=[detect_log])
 
 if __name__ == "__main__":
-    # share=True 生成公网链接
     demo.queue().launch(share=True, debug=True)

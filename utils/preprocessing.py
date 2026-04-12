@@ -10,10 +10,14 @@ from sklearn.model_selection import train_test_split
 
 
 class NetVisionPreprocessor:
-    def __init__(self, input_dir, output_idx_path, dataset_name, img_size=28, truncate_len=784):
+    def __init__(self, input_dir, output_idx_path, dataset_name, max_packets=0, img_size=28, truncate_len=784):
+        """
+        :param max_packets: 单个文件读取的数据包上限，设为 0 则表示全量读取
+        """
         self.input_dir = input_dir
         self.output_idx_path = output_idx_path
         self.dataset_name = dataset_name
+        self.max_packets = max_packets
         self.img_size = img_size
         self.truncate_len = truncate_len
         os.makedirs(os.path.dirname(self.output_idx_path), exist_ok=True)
@@ -50,23 +54,18 @@ class NetVisionPreprocessor:
         for file_path in pcap_files:
             base_name = os.path.basename(file_path)
 
-            # 【智能标签提取逻辑】
-            # 因为 CIC_IoT_2023, USTC 等数据集 pcap 文件直接在文件夹下，所以直接使用去掉后缀的文件名作为标签
+            # 【智能标签提取逻辑】文件名即标签
             label_name = os.path.splitext(base_name)[0]
 
             print(f"\n正在处理: {base_name} (分配标签: {label_name})")
 
-            # === 核心优化 1：内存优化的流式读取引擎 ===
+            # 核心优化：内存优化的流式读取引擎
             sessions = defaultdict(bytes)
-
-            # === 核心优化 2：数据重采样与防过拟合截断 ===
-            max_packets_per_file = 300000  # 每个文件最多只读取前 30 万个数据包 (可根据需要修改)
 
             try:
                 with PcapReader(file_path) as pcap_reader:
                     i = 0
                     while True:
-                        # === 核心优化 3：异常与畸形包跳过机制 (抗损毁) ===
                         try:
                             pkt = pcap_reader.read_packet()
                         except EOFError:
@@ -74,11 +73,13 @@ class NetVisionPreprocessor:
                         except Exception:
                             continue
 
-                        if i >= max_packets_per_file:
-                            print(f"    [!] 达到采样上限 ({max_packets_per_file}包)，触发防过拟合截断，停止读取。")
+                        # [修改] 只有在设置了大于 0 的采样上限时才触发截断
+                        if self.max_packets > 0 and i >= self.max_packets:
+                            print(f"    [!] 达到预设采样上限 ({self.max_packets}包)，触发防过拟合截断，停止读取。")
                             break
 
-                        if i > 0 and i % 10000 == 0:
+                        # 每读取 5 万个包打印一次进度
+                        if i > 0 and i % 50000 == 0:
                             print(f"    ... 已读取 {i} 个数据包 ...")
 
                         cleaned_data = self.traffic_cleaning(pkt)
@@ -95,6 +96,7 @@ class NetVisionPreprocessor:
 
                             src = net_layer.src
                             dst = net_layer.dst
+                            # 动态适配 IPv4(proto) 和 IPv6(nh)
                             proto = net_layer.proto if has_ip4 else net_layer.nh
                             sport, dport = 0, 0
 
@@ -105,15 +107,18 @@ class NetVisionPreprocessor:
                                 sport = pkt[UDP].sport
                                 dport = pkt[UDP].dport
 
+                            # 排序源和目的端口，保证双向流量被划分为同一个 Session
                             end1 = f"{src}:{sport}"
                             end2 = f"{dst}:{dport}"
                             session_key = f"{proto}-" + "-".join(sorted([end1, end2]))
 
+                            # 如果该会话未满 784 字节，继续拼接
                             if len(sessions[session_key]) < self.truncate_len:
                                 sessions[session_key] += cleaned_data
 
                         i += 1
 
+                        # 将收集好的所有会话转换为二维灰度图像
                 print(f"    [+] {base_name} 读取完毕！共提取 {len(sessions)} 个有效会话，正在转换为图像矩阵...")
                 for sess_key, session_bytes in sessions.items():
                     if len(session_bytes) == 0:
@@ -136,12 +141,9 @@ class NetVisionPreprocessor:
 
         print(f"\n正在按 8:2 的比例划分 {self.dataset_name} 训练集和测试集...")
 
+        # 过滤掉样本数少于 2 的类别
         unique_labels, counts = np.unique(labels, return_counts=True)
         valid_labels = unique_labels[counts >= 2]
-        dropped_labels = unique_labels[counts < 2]
-
-        if len(dropped_labels) > 0:
-            print(f"[!] 自动过滤样本数不足 2 的极稀有类别: {list(dropped_labels)}")
 
         valid_indices = np.isin(labels, valid_labels)
         images = images[valid_indices]
@@ -163,10 +165,12 @@ class NetVisionPreprocessor:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NetVision PCAP Preprocessing (Streaming & Optimized)")
-    # 将 ENTA_Datase 替换为 CIC_IoT_2023
     parser.add_argument('--dataset', type=str, default='USTC_TFC2016',
                         choices=['USTC_TFC2016', 'CIC_IoT_2023', 'ToN-IoT', 'all'],
                         help='选择要处理的数据集名称')
+    # [新增] max_packets 参数
+    parser.add_argument('--max_packets', type=int, default=300000,
+                        help='单个 PCAP 文件读取的数据包上限 (设为 0 则全量读取)')
 
     args = parser.parse_args()
 
@@ -174,6 +178,7 @@ if __name__ == "__main__":
     BASE_PROCESSED_DIR = "data/processed"
     os.makedirs(BASE_PROCESSED_DIR, exist_ok=True)
 
+    # 动态构建需要处理的数据集列表
     datasets_to_process = ['USTC_TFC2016', 'CIC_IoT_2023', 'ToN-IoT'] if args.dataset == 'all' else [args.dataset]
 
     for ds_name in datasets_to_process:
@@ -186,10 +191,13 @@ if __name__ == "__main__":
             print(f"[!] 错误: 找不到数据集目录 {raw_data_dir}")
             continue
 
+        # 统一规范化保存文件名
         safe_ds_name = ds_name.lower().replace('-', '_')
         output_path = os.path.join(BASE_PROCESSED_DIR, f"{safe_ds_name}_dataset.npz")
 
-        preprocessor = NetVisionPreprocessor(raw_data_dir, output_path, dataset_name=ds_name)
+        # 传入 max_packets 参数
+        preprocessor = NetVisionPreprocessor(raw_data_dir, output_path, dataset_name=ds_name,
+                                             max_packets=args.max_packets)
         imgs, lbls = preprocessor.pcap_to_images()
 
         if len(imgs) > 0:
