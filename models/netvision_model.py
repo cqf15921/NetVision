@@ -7,10 +7,12 @@ from torch import Tensor
 # ==========================================
 # 1. SE 注意力模块 (Squeeze-and-Excitation)
 # ==========================================
+#
 class SELayer(nn.Module):
     def __init__(self, channel, reduction=4):
         super(SELayer, self).__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        # 降维比例 reduction 确保计算轻量化
         self.fc = nn.Sequential(
             nn.Linear(channel, channel // reduction, bias=False),
             nn.ReLU(inplace=True),
@@ -26,7 +28,7 @@ class SELayer(nn.Module):
 
 
 # ==========================================
-# 2. 基础组件：通道重排与 Ghost 模块 (原版保留对比)
+# 2. 基础组件：通道重排与 Ghost 模块
 # ==========================================
 def channel_shuffle(x: Tensor, groups: int) -> Tensor:
     batchsize, num_channels, height, width = x.data.size()
@@ -64,70 +66,55 @@ class GhostModule(nn.Module):
 
 
 # ==========================================
-# 3. [新增] 消融实验组件：标准卷积模块
+# 3. 核心模块：LRBBlock (修正维度匹配)
 # ==========================================
-class StandardConvModule(nn.Module):
-    """
-    用于替代 GhostModule 的标准卷积模块 (Conv2d + BatchNorm + ReLU)
-    接口与 GhostModule 保持完全一致，以实现无缝替换
-    """
-    def __init__(self, inp, oup, kernel_size=1, stride=1, relu=True):
-        super(StandardConvModule, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(inp, oup, kernel_size, stride, padding=kernel_size // 2, bias=False),
-            nn.BatchNorm2d(oup),
-            nn.ReLU(inplace=True) if relu else nn.Sequential()
-        )
-
-    def forward(self, x):
-        return self.conv(x)
-
-
-# ==========================================
-# 4. 核心模块：无 Ghost 的 LRBBlock (消融版)
-# ==========================================
-class LRBBlock_NoGhost(nn.Module):
-    """
-    保留了 LightGuard 的通道拆分 (Channel Split)、通道重排 (Channel Shuffle)
-    和 SE 注意力机制，但将其中的特征提取算子从 GhostModule 退化为传统的 StandardConvModule。
-    """
+class LRBBlock(nn.Module):
     def __init__(self, in_chs, mid_chs, out_chs, stride=1):
-        super(LRBBlock_NoGhost, self).__init__()
+        super(LRBBlock, self).__init__()
         self.stride = stride
 
+        # 左右分支的输出通道各占总输出的一半
         new_out_channel = out_chs // 2
 
         if stride == 1:
+            # 此时要求 in_chs == out_chs
             new_channel = in_chs // 2
             self.branch2 = nn.Sequential(
-                StandardConvModule(new_channel, mid_chs, relu=True),
-                StandardConvModule(mid_chs, new_out_channel, relu=False)
+                GhostModule(new_channel, mid_chs, relu=True),
+                GhostModule(mid_chs, new_out_channel, relu=False)
             )
             self.shortcut = nn.Sequential()
         else:
+            # 下采样分支：16 -> 32
+            # 分支 1：使用 AvgPool2d 代替插值，保证边缘信息完整
             self.branch1 = nn.Sequential(
                 nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
             )
 
+            # 分支 2：深度特征提取 + 下采样
             self.branch2 = nn.Sequential(
-                StandardConvModule(in_chs, mid_chs, relu=True),
+                GhostModule(in_chs, mid_chs, relu=True),
                 nn.Conv2d(mid_chs, mid_chs, 3, stride=stride, padding=1, groups=mid_chs, bias=False),
                 nn.BatchNorm2d(mid_chs),
-                StandardConvModule(mid_chs, new_out_channel, relu=False)
+                GhostModule(mid_chs, new_out_channel, relu=False)
             )
 
+            # 尺寸减半时的残差映射
             self.shortcut = nn.Sequential(
                 nn.Conv2d(in_chs, new_out_channel, kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(new_out_channel)
             )
 
+        # 在每个 LRB 块末尾集成 SE 注意力模块
         self.se = SELayer(out_chs)
 
     def forward(self, x):
         if self.stride == 1:
+            # Stride=1 使用 Channel Split
             x1, x2 = x.chunk(2, dim=1)
             out = torch.cat((x1, self.branch2(x2) + self.shortcut(x2)), dim=1)
         else:
+            # Stride=2 左右分支直接拼接，完成通道翻倍
             out1 = self.branch1(x)
             out2 = self.branch2(x) + self.shortcut(x)
             out = torch.cat((out1, out2), dim=1)
@@ -137,42 +124,45 @@ class LRBBlock_NoGhost(nn.Module):
 
 
 # ==========================================
-# 5. 主网络：NetVision (应用消融版 LRB)
+# 4. 主网络：NetVision (修正堆叠参数)
 # ==========================================
 class NetVision(nn.Module):
     def __init__(self, num_classes=8):
         super(NetVision, self).__init__()
 
+        # 初始特征层 (28x28 -> 14x14)
         self.conv1 = nn.Sequential(
             nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(16),
             nn.ReLU(inplace=True)
         )
 
-        # 这里全面替换为无 Ghost 的 LRB 块 (LRBBlock_NoGhost)
+        # 核心 LRB 堆叠配置：遵循“下采样翻倍，平阶块不变”
         self.layer1 = nn.Sequential(
-            LRBBlock_NoGhost(16, 32, 32, stride=2),
-            LRBBlock_NoGhost(32, 48, 32, stride=1)
+            LRBBlock(16, 32, 32, stride=2),  # 14x14 -> 7x7, 16 -> 32
+            LRBBlock(32, 48, 32, stride=1)
         )
 
         self.layer2 = nn.Sequential(
-            LRBBlock_NoGhost(32, 64, 64, stride=2),
-            LRBBlock_NoGhost(64, 96, 64, stride=1)
+            LRBBlock(32, 64, 64, stride=2),  # 7x7 -> 4x4, 32 -> 64
+            LRBBlock(64, 96, 64, stride=1)
         )
 
         self.layer3 = nn.Sequential(
-            LRBBlock_NoGhost(64, 128, 128, stride=2),
-            LRBBlock_NoGhost(128, 192, 128, stride=1)
+            LRBBlock(64, 128, 128, stride=2),  # 4x4 -> 2x2, 64 -> 128
+            LRBBlock(128, 192, 128, stride=1)
         )
 
+        # 全局池化与分类头
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.f1 = nn.Sequential(
-            nn.Linear(128, 256),
+            nn.Linear(128, 256),  # 输入维度需匹配 layer3 的输出 128
             nn.ReLU(inplace=True),
             nn.Dropout(0.2),
             nn.Linear(256, num_classes)
         )
 
+        # 参数初始化
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -197,4 +187,5 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = NetVision(num_classes=8).to(device)
+    # 输入为 (1, 28, 28) 以匹配 784 字节截断长度
     summary(model, (1, 28, 28))
