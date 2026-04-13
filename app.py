@@ -52,7 +52,14 @@ def stream_command(cmd, task_name):
 # ==========================================
 def run_preprocessing(upload_dir, default_dataset, max_packets):
     """执行预处理，支持文件夹上传和采样上限设置"""
-    target_ds = default_dataset if default_dataset else "CIC_IoT_2023"
+    # 修复：处理“无”选项逻辑
+    if default_dataset == "无":
+        if upload_dir is None:
+            yield "❌ 错误：选择了【无】规范时，必须上传包含流量包的文件夹！\n"
+            return
+        target_ds = "User_Dataset"  # 为用户自定义上传的数据集分配统一内部名称
+    else:
+        target_ds = default_dataset
 
     if upload_dir is not None:
         raw_dir = f"data/raw/{target_ds}"
@@ -73,7 +80,7 @@ def run_preprocessing(upload_dir, default_dataset, max_packets):
 
     # 将采样上限参数传递给后台脚本
     cmd = f"python utils/preprocessing.py --dataset {target_ds} --max_packets {int(max_packets)}"
-    yield f"🚀 正在启动预处理引擎 (采样上限: {int(max_packets) if max_packets > 0 else '全量读取'})...\n"
+    yield f"🚀 正在启动预处理引擎 (目标数据集: {target_ds}, 采样上限: {int(max_packets) if max_packets > 0 else '全量读取'})...\n"
     for log in stream_command(cmd, "preprocess"):
         yield log
     yield log + "\n\n✅ 预处理任务结束。"
@@ -88,7 +95,8 @@ def stop_preprocessing():
 
 
 def run_training(dataset_choice, batch_size, epochs):
-    target_ds = dataset_choice if dataset_choice else "CIC_IoT_2023"
+    # 修复：训练时识别“无”选项对应的数据集
+    target_ds = "User_Dataset" if dataset_choice == "无" else dataset_choice
     cmd = f"python train.py --dataset {target_ds} --batch_size {int(batch_size)} --epochs {int(epochs)}"
 
     yield f"🚀 正在启动 NetVision 训练引擎...\n数据集: {target_ds} | Epochs: {epochs}\n"
@@ -107,7 +115,9 @@ def stop_training():
 
 def get_latest_model(dataset_choice):
     """获取训练生成的最佳模型权重文件"""
-    target_ds = dataset_choice.lower().replace('-', '_')
+    # 修复：获取权重时识别“无”选项
+    target_ds_name = "User_Dataset" if dataset_choice == "无" else dataset_choice
+    target_ds = target_ds_name.lower().replace('-', '_')
     model_path = f"checkpoints/netvision_{target_ds}.pth"
     if os.path.exists(model_path):
         return model_path
@@ -121,10 +131,27 @@ def run_detection(test_file, model_file, dataset_choice):
     yield "🔎 正在初始化 NetVision 流量检测引擎...\n"
     time.sleep(1)
 
-    target_ds = dataset_choice if dataset_choice else "CIC_IoT_2023"
-    cmd = f"python test.py --dataset {target_ds}"
+    # 修复：处理“无”选项（自定义检测模式）
+    if dataset_choice == "无":
+        if not test_file or not model_file:
+            yield "❌ 错误：选择了【无】规范时，必须上传 [待检测测试集] 和 [自定义权重]！\n"
+            return
 
-    yield f"[*] 检测规范: {target_ds}\n"
+        test_path = getattr(test_file, 'name', str(test_file))
+        model_path = getattr(model_file, 'name', str(model_file))
+
+        # 组装带自定义路径的命令
+        cmd = f"python test.py --custom_test_path \"{test_path}\" --custom_model_path \"{model_path}\""
+
+        yield f"[*] 模式: 自定义检测\n"
+        yield f"[*] 测试集路径: {test_path}\n"
+        yield f"[*] 权重路径: {model_path}\n"
+    else:
+        # 使用系统内置的数据集和模型
+        cmd = f"python test.py --dataset {dataset_choice}"
+        yield f"[*] 模式: 内置规范检测\n"
+        yield f"[*] 检测规范: {dataset_choice}\n"
+
     yield f"[*] 正在分析目标流量特征并生成报告...\n"
 
     final_log = ""
@@ -152,9 +179,10 @@ with gr.Blocks(title="NetVision 物联网恶意流量检测系统", theme=theme)
             with gr.Column(scale=1):
                 gr.Markdown("### 1. 数据集配置")
                 upload_dataset = gr.File(label="📂 上传包含流量包的文件夹", file_count="directory")
+                # 修复：默认数据集加入“无”选项，并设为默认值
                 default_dataset = gr.Dropdown(
-                    choices=["CIC_IoT_2023", "USTC_TFC2016", "ToN-IoT"],
-                    value="CIC_IoT_2023",
+                    choices=["无", "CIC_IoT_2023", "USTC_TFC2016", "ToN-IoT"],
+                    value="无",
                     label="使用系统内置数据集"
                 )
 
@@ -201,8 +229,8 @@ with gr.Blocks(title="NetVision 物联网恶意流量检测系统", theme=theme)
                 upload_test = gr.File(label="上传待检测测试集 (.npz/.pcap)")
                 upload_weight = gr.File(label="上传自定义权重 (.pth)")
                 target_env = gr.Dropdown(
-                    choices=["CIC_IoT_2023", "USTC_TFC2016", "ToN-IoT"],
-                    value="CIC_IoT_2023",
+                    choices=["无", "CIC_IoT_2023", "USTC_TFC2016", "ToN-IoT"],
+                    value="无",
                     label="选择检测规范"
                 )
                 btn_detect = gr.Button("🚨 启动流量检测识别", variant="primary")
