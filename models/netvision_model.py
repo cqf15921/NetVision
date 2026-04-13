@@ -7,6 +7,7 @@ from torch import Tensor
 # ==========================================
 # 1. SE 注意力模块 (Squeeze-and-Excitation)
 # ==========================================
+#
 class SELayer(nn.Module):
     def __init__(self, channel, reduction=4):
         super(SELayer, self).__init__()
@@ -65,7 +66,7 @@ class GhostModule(nn.Module):
 
 
 # ==========================================
-# 3. 核心模块：LRBBlock (原版轻量级残差块，保留以备后用)
+# 3. 核心模块：LRBBlock (修正维度匹配)
 # ==========================================
 class LRBBlock(nn.Module):
     def __init__(self, in_chs, mid_chs, out_chs, stride=1):
@@ -123,51 +124,7 @@ class LRBBlock(nn.Module):
 
 
 # ==========================================
-# 新增：用于消融实验的经典残差块 (Classical Residual Block)
-# ==========================================
-class ClassicalResidualBlock(nn.Module):
-    def __init__(self, in_chs, mid_chs, out_chs, stride=1):
-        # 注意：标准残差块不需要 mid_chs，但为了保持与原来 NetVision 传参格式的兼容性，保留该参数
-        super(ClassicalResidualBlock, self).__init__()
-
-        # 第一个 3x3 标准卷积 (如果 stride=2 则在这里下采样)
-        self.conv1 = nn.Conv2d(in_chs, out_chs, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_chs)
-
-        # 第二个 3x3 标准卷积
-        self.conv2 = nn.Conv2d(out_chs, out_chs, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_chs)
-
-        self.relu = nn.ReLU(inplace=True)
-
-        # 捷径分支 (Shortcut connection)
-        self.shortcut = nn.Sequential()
-        # 如果通道数发生变化，或者步长不为 1，需要使用 1x1 卷积调整维度以确保可以相加
-        if stride != 1 or in_chs != out_chs:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_chs, out_chs, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(out_chs)
-            )
-
-    def forward(self, x):
-        identity = self.shortcut(x)
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-
-        # 残差相加
-        out += identity
-        out = self.relu(out)
-
-        return out
-
-
-# ==========================================
-# 4. 主网络：NetVision (当前被修改为消融实验版本)
+# 4. 主网络：NetVision (修正堆叠参数)
 # ==========================================
 class NetVision(nn.Module):
     def __init__(self, num_classes=8):
@@ -180,21 +137,20 @@ class NetVision(nn.Module):
             nn.ReLU(inplace=True)
         )
 
-        # 替换为经典残差块 (ClassicalResidualBlock) 用于消融实验
-        # 若要恢复轻量级网络，将下面的 ClassicalResidualBlock 改回 LRBBlock 即可
+        # 核心 LRB 堆叠配置：遵循“下采样翻倍，平阶块不变”
         self.layer1 = nn.Sequential(
-            ClassicalResidualBlock(16, 32, 32, stride=2),  # 14x14 -> 7x7, 16 -> 32
-            ClassicalResidualBlock(32, 48, 32, stride=1)
+            LRBBlock(16, 32, 32, stride=2),  # 14x14 -> 7x7, 16 -> 32
+            LRBBlock(32, 48, 32, stride=1)
         )
 
         self.layer2 = nn.Sequential(
-            ClassicalResidualBlock(32, 64, 64, stride=2),  # 7x7 -> 4x4, 32 -> 64
-            ClassicalResidualBlock(64, 96, 64, stride=1)
+            LRBBlock(32, 64, 64, stride=2),  # 7x7 -> 4x4, 32 -> 64
+            LRBBlock(64, 96, 64, stride=1)
         )
 
         self.layer3 = nn.Sequential(
-            ClassicalResidualBlock(64, 128, 128, stride=2),  # 4x4 -> 2x2, 64 -> 128
-            ClassicalResidualBlock(128, 192, 128, stride=1)
+            LRBBlock(64, 128, 128, stride=2),  # 4x4 -> 2x2, 64 -> 128
+            LRBBlock(128, 192, 128, stride=1)
         )
 
         # 全局池化与分类头
