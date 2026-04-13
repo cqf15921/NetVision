@@ -1,12 +1,17 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
-from sklearn.metrics import classification_report, accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import classification_report, accuracy_score, precision_score, recall_score, f1_score, \
+    confusion_matrix
 import time
 import os
 import argparse
 import numpy as np
 from thop import profile  # 用于计算 FLOPs 和 参数量
+
+# 引入可视化绘图库
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # 导入你的模型和数据集加载类 (已更新为 NetVision)
 from models.netvision_model import NetVision
@@ -166,6 +171,44 @@ def test():
     target_names = [str(x) for x in test_dataset.unique_labels]
     print("\n详细分类报告:")
     print(classification_report(all_labels, all_preds, target_names=target_names, zero_division=0))
+
+    # =====================================================================
+    # 7. 生成各项指标的可视化图表并保存
+    # =====================================================================
+    print("[*] 正在生成可视化图表...")
+    os.makedirs('results', exist_ok=True)
+
+    # (1) 性能指标柱状图
+    plt.figure(figsize=(8, 6))
+    metrics_names = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
+    metrics_values = [accuracy, precision, recall, f1]
+
+    # 确保 seaborn 正常绘制柱状图
+    sns.barplot(x=metrics_names, y=metrics_values, palette="viridis")
+    plt.title(f'{eval_target_name} Performance Metrics (%)')
+    plt.ylim(0, 100)
+
+    # 在柱子上添加具体的数值标签
+    for i, v in enumerate(metrics_values):
+        plt.text(i, v + 1.5, f"{v:.2f}%", color='black', ha='center', fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig('results/metrics_bar.png', dpi=300)
+    plt.close()
+
+    # (2) 混淆矩阵热力图
+    cm = confusion_matrix(all_labels, all_preds)
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=target_names, yticklabels=target_names)
+    plt.title(f'Confusion Matrix on {eval_target_name}')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.savefig('results/confusion_matrix.png', dpi=300)
+    plt.close()
+
+    print("[*] 可视化图表已生成，并保存至 results/ 目录！")
 
 
 if __name__ == "__main__":

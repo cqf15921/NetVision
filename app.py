@@ -52,7 +52,6 @@ def stream_command(cmd, task_name):
 # ==========================================
 def run_preprocessing(upload_dir, default_dataset, max_packets):
     """执行预处理，支持文件夹上传和采样上限设置"""
-    # 修复：处理“无”选项逻辑
     if default_dataset == "无":
         if upload_dir is None:
             yield "❌ 错误：选择了【无】规范时，必须上传包含流量包的文件夹！\n"
@@ -95,7 +94,6 @@ def stop_preprocessing():
 
 
 def run_training(dataset_choice, batch_size, epochs):
-    # 修复：训练时识别“无”选项对应的数据集
     target_ds = "User_Dataset" if dataset_choice == "无" else dataset_choice
     cmd = f"python train.py --dataset {target_ds} --batch_size {int(batch_size)} --epochs {int(epochs)}"
 
@@ -115,7 +113,6 @@ def stop_training():
 
 def get_latest_model(dataset_choice):
     """获取训练生成的最佳模型权重文件"""
-    # 修复：获取权重时识别“无”选项
     target_ds_name = "User_Dataset" if dataset_choice == "无" else dataset_choice
     target_ds = target_ds_name.lower().replace('-', '_')
     model_path = f"checkpoints/netvision_{target_ds}.pth"
@@ -128,13 +125,14 @@ def get_latest_model(dataset_choice):
 # 模块二：恶意流量检测回调函数
 # ==========================================
 def run_detection(test_file, model_file, dataset_choice):
-    yield "🔎 正在初始化 NetVision 流量检测引擎...\n"
+    # 新增对图片的空值占位 (yield 三个元素对应 log, metrics_plot, cm_plot)
+    yield "🔎 正在初始化 NetVision 流量检测引擎...\n", None, None
     time.sleep(1)
 
-    # 修复：处理“无”选项（自定义检测模式）
+    # 处理“无”选项（自定义检测模式）
     if dataset_choice == "无":
         if not test_file or not model_file:
-            yield "❌ 错误：选择了【无】规范时，必须上传 [待检测测试集] 和 [自定义权重]！\n"
+            yield "❌ 错误：选择了【无】规范时，必须上传 [待检测测试集] 和 [自定义权重]！\n", None, None
             return
 
         test_path = getattr(test_file, 'name', str(test_file))
@@ -143,22 +141,26 @@ def run_detection(test_file, model_file, dataset_choice):
         # 组装带自定义路径的命令
         cmd = f"python test.py --custom_test_path \"{test_path}\" --custom_model_path \"{model_path}\""
 
-        yield f"[*] 模式: 自定义检测\n"
-        yield f"[*] 测试集路径: {test_path}\n"
-        yield f"[*] 权重路径: {model_path}\n"
+        yield f"[*] 模式: 自定义检测\n[*] 测试集路径: {test_path}\n[*] 权重路径: {model_path}\n", None, None
     else:
         # 使用系统内置的数据集和模型
         cmd = f"python test.py --dataset {dataset_choice}"
-        yield f"[*] 模式: 内置规范检测\n"
-        yield f"[*] 检测规范: {dataset_choice}\n"
+        yield f"[*] 模式: 内置规范检测\n[*] 检测规范: {dataset_choice}\n", None, None
 
-    yield f"[*] 正在分析目标流量特征并生成报告...\n"
+    yield f"[*] 正在分析目标流量特征并生成报告...\n", None, None
 
     final_log = ""
     for log in stream_command(cmd, "detect"):
         final_log = log
-        yield log
-    yield final_log + "\n\n✅ 检测完毕！"
+        # 实时流输出时，图片占位为 None
+        yield log, None, None
+
+    # 检测结束后，读取 test.py 生成的图片文件路径
+    cm_img = "results/confusion_matrix.png" if os.path.exists("results/confusion_matrix.png") else None
+    bar_img = "results/metrics_bar.png" if os.path.exists("results/metrics_bar.png") else None
+
+    # 将生成的图片路径传给前端组件
+    yield final_log + "\n\n✅ 检测与可视化完毕！", bar_img, cm_img
 
 
 # ==========================================
@@ -179,7 +181,6 @@ with gr.Blocks(title="NetVision 物联网恶意流量检测系统", theme=theme)
             with gr.Column(scale=1):
                 gr.Markdown("### 1. 数据集配置")
                 upload_dataset = gr.File(label="📂 上传包含流量包的文件夹", file_count="directory")
-                # 修复：默认数据集加入“无”选项，并设为默认值
                 default_dataset = gr.Dropdown(
                     choices=["无", "CIC_IoT_2023", "USTC_TFC2016", "ToN-IoT"],
                     value="无",
@@ -237,9 +238,22 @@ with gr.Blocks(title="NetVision 物联网恶意流量检测系统", theme=theme)
 
             with gr.Column(scale=2):
                 gr.Markdown("### 识别结果报告")
-                detect_log = gr.Textbox(label="检测进度与安全研判", lines=20, max_lines=25, interactive=False)
+                # 缩短日志框高度以为图片留出空间
+                detect_log = gr.Textbox(label="检测进度与安全研判", lines=10, max_lines=15, interactive=False)
 
-        btn_detect.click(fn=run_detection, inputs=[upload_test, upload_weight, target_env], outputs=[detect_log])
+                # ==============================
+                # 新增的可视化图表展示区域
+                # ==============================
+                with gr.Row():
+                    metrics_plot = gr.Image(label="总体性能指标柱状图", type="filepath")
+                    cm_plot = gr.Image(label="分类混淆矩阵", type="filepath")
+
+        # 绑定检测事件，输出增加到了 3 个：文本框、柱状图、混淆矩阵
+        btn_detect.click(
+            fn=run_detection,
+            inputs=[upload_test, upload_weight, target_env],
+            outputs=[detect_log, metrics_plot, cm_plot]
+        )
 
 if __name__ == "__main__":
     demo.queue().launch(share=True, debug=True)
