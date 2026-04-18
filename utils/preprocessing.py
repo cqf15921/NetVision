@@ -180,7 +180,7 @@ class NetVisionPreprocessor:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NetVision Preprocessing")
     parser.add_argument('--dataset', type=str, default='USTC_TFC2016',
-                        choices=['USTC_TFC2016', 'CIC_IoT_2023', 'ToN-IoT', 'all'])
+                        help='选择要处理的数据集名称')
     parser.add_argument('--max_packets', type=int, default=300000)
     args = parser.parse_args()
 

@@ -11,15 +11,15 @@ from utils.dataset import NetVisionDataset
 def train():
     parser = argparse.ArgumentParser(description='NetVision 深度学习模型训练脚本')
     # 核心参数
+    # 修改 train.py (大约第 14 行)
     parser.add_argument('--dataset', type=str, default='CIC_IoT_2023',
-                        choices=['USTC_TFC2016', 'CIC_IoT_2023', 'ToN-IoT'],
-                        help='选择要训练的数据集')
+                        help='选择要训练的数据集名称')
     parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
     parser.add_argument('--lr', type=float, default=0.001, help='初始学习率')
     parser.add_argument('--epochs', type=int, default=15, help='训练轮数')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='训练设备')
 
-    # 控制打印频率的参数
+    # 新增：控制打印频率的参数，默认 1000
     parser.add_argument('--log_interval', type=int, default=1000, help='每隔多少个 step 打印一次日志')
 
     args = parser.parse_args()
@@ -31,7 +31,6 @@ def train():
     # 2. 加载数据集
     print(f"[*] 正在加载数据集: {args.dataset}...")
     try:
-        # 使用更新后的 NetVisionDataset，它会自动处理 labels 和 classes
         train_dataset = NetVisionDataset(data_dir=processed_dir, dataset_name=args.dataset, is_train=True)
         train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
@@ -80,10 +79,12 @@ def train():
             total_train += labels.size(0)
             correct_train += predicted.eq(labels).sum().item()
 
+            # --- 修改后的打印逻辑 ---
             if (i + 1) % args.log_interval == 0:
                 print(f'Epoch [{epoch + 1:2d}/{args.epochs}] | Step [{i + 1:5d}/{len(train_loader)}] | '
                       f'Loss: {loss.item():.4f} | Train Acc: {100. * correct_train / total_train:.2f}%')
 
+        # 更新学习率
         scheduler.step()
         train_acc = 100. * correct_train / total_train
         train_loss_avg = running_loss / len(train_loader)
@@ -110,24 +111,19 @@ def train():
         val_acc = 100. * val_correct / val_total
         val_loss_avg = val_loss / len(test_loader)
 
+        # 每个 Epoch 结束时的固定总结打印
         print(f'==> Epoch {epoch + 1} 结束 | '
               f'Train Loss: {train_loss_avg:.4f}, Train Acc: {train_acc:.2f}% | '
               f'Val Loss: {val_loss_avg:.4f}, Val Acc: {val_acc:.2f}%')
 
         # ====================
-        # [C] 保存最佳模型 (已修改：打包类别名单)
+        # [C] 保存最佳模型
         # ====================
         if val_acc > best_acc:
             best_acc = val_acc
             save_path = f'checkpoints/netvision_{safe_dataset_name}.pth'
-
-            # 【关键修改】：将权重和类别名单一起封装进字典保存
-            checkpoint = {
-                'state_dict': model.state_dict(),
-                'classes': train_dataset.unique_labels
-            }
-            torch.save(checkpoint, save_path)
-            print(f'    [+] 发现最佳模型 (Val Acc: {best_acc:.2f}%)，权重与类别名单已保存。')
+            torch.save(model.state_dict(), save_path)
+            print(f'    [+] 发现最佳模型 (Val Acc: {best_acc:.2f}%)，权重已保存。')
 
     print(f"\n[*] 训练任务完成! 最终最佳测试集准确率: {best_acc:.2f}%")
 
