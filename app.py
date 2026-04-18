@@ -227,7 +227,7 @@ with gr.Blocks(title="NetVision 物联网恶意流量检测系统", theme=theme)
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### 配置检测环境")
-                upload_test = gr.File(label="上传待检测测试集 (.npz/.pcap)")
+                upload_test = gr.File(label="上传待检测测试集 (.npz)")
                 upload_weight = gr.File(label="上传自定义权重 (.pth)")
                 target_env = gr.Dropdown(
                     choices=["无", "CIC_IoT_2023", "USTC_TFC2016", "ToN-IoT"],
