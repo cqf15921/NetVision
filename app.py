@@ -125,14 +125,23 @@ def get_latest_model(dataset_choice):
 # 模块二：恶意流量检测回调函数
 # ==========================================
 def run_detection(test_file, model_file, dataset_choice):
-    # 新增对图片的空值占位 (yield 三个元素对应 log, metrics_plot, cm_plot)
+    """执行检测，并确保可视化结果实时刷新"""
+
+    # 【优化点 1】启动前清理旧的评估结果图片，防止旧图残留误导用户
+    for img_file in ["results/confusion_matrix.png", "results/metrics_bar.png"]:
+        if os.path.exists(img_file):
+            try:
+                os.remove(img_file)
+            except Exception:
+                pass
+
     yield "🔎 正在初始化 NetVision 流量检测引擎...\n", None, None
     time.sleep(1)
 
     # 处理“无”选项（自定义检测模式）
     if dataset_choice == "无":
         if not test_file or not model_file:
-            yield "❌ 错误：选择了【无】规范时，必须上传 [待检测测试集] 和 [自定义权重]！\n", None, None
+            yield "❌ 错误：选择了【无】规范时，必须上传 [待检测特征集 .npz] 和 [自定义权重 .pth]！\n", None, None
             return
 
         test_path = getattr(test_file, 'name', str(test_file))
@@ -141,7 +150,7 @@ def run_detection(test_file, model_file, dataset_choice):
         # 组装带自定义路径的命令
         cmd = f"python test.py --custom_test_path \"{test_path}\" --custom_model_path \"{model_path}\""
 
-        yield f"[*] 模式: 自定义检测\n[*] 测试集路径: {test_path}\n[*] 权重路径: {model_path}\n", None, None
+        yield f"[*] 模式: 自定义检测\n[*] 特征集路径: {test_path}\n[*] 权重路径: {model_path}\n", None, None
     else:
         # 使用系统内置的数据集和模型
         cmd = f"python test.py --dataset {dataset_choice}"
@@ -227,7 +236,8 @@ with gr.Blocks(title="NetVision 物联网恶意流量检测系统", theme=theme)
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### 配置检测环境")
-                upload_test = gr.File(label="上传待检测测试集 (.npz)")
+                # 【优化点 2】修正 UI 引导语，明确要求上传预处理后的 .npz 文件
+                upload_test = gr.File(label="上传待检测的流量特征集 (.npz)")
                 upload_weight = gr.File(label="上传自定义权重 (.pth)")
                 target_env = gr.Dropdown(
                     choices=["无", "CIC_IoT_2023", "USTC_TFC2016", "ToN-IoT"],
@@ -238,17 +248,13 @@ with gr.Blocks(title="NetVision 物联网恶意流量检测系统", theme=theme)
 
             with gr.Column(scale=2):
                 gr.Markdown("### 识别结果报告")
-                # 缩短日志框高度以为图片留出空间
                 detect_log = gr.Textbox(label="检测进度与安全研判", lines=10, max_lines=15, interactive=False)
 
-                # ==============================
-                # 新增的可视化图表展示区域
-                # ==============================
                 with gr.Row():
                     metrics_plot = gr.Image(label="总体性能指标柱状图", type="filepath")
                     cm_plot = gr.Image(label="分类混淆矩阵", type="filepath")
 
-        # 绑定检测事件，输出增加到了 3 个：文本框、柱状图、混淆矩阵
+        # 绑定检测事件
         btn_detect.click(
             fn=run_detection,
             inputs=[upload_test, upload_weight, target_env],

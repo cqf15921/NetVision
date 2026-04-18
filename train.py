@@ -10,8 +10,9 @@ from utils.dataset import NetVisionDataset
 
 def train():
     parser = argparse.ArgumentParser(description='NetVision 深度学习模型训练脚本')
+
     # 核心参数
-    # 修改 train.py (大约第 14 行)
+    # 【优化点 1】：删除了 choices 限制，允许接收来自 UI 界面的 "User_Dataset"
     parser.add_argument('--dataset', type=str, default='CIC_IoT_2023',
                         help='选择要训练的数据集名称')
     parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
@@ -19,12 +20,12 @@ def train():
     parser.add_argument('--epochs', type=int, default=15, help='训练轮数')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='训练设备')
 
-    # 新增：控制打印频率的参数，默认 1000
+    # 控制打印频率的参数
     parser.add_argument('--log_interval', type=int, default=1000, help='每隔多少个 step 打印一次日志')
 
     args = parser.parse_args()
 
-    # 1. 动态确定路径与类别数
+    # 1. 动态确定路径与统一命名格式
     safe_dataset_name = args.dataset.lower().replace('-', '_')
     processed_dir = "data/processed"
 
@@ -42,6 +43,13 @@ def train():
 
     num_classes = train_dataset.get_num_classes()
     print(f"[*] 类别数: {num_classes} | 训练集: {len(train_dataset)} | 测试集: {len(test_dataset)}")
+
+    # 【优化点 2】：拦截单类别训练，防止 CrossEntropyLoss 发生 Target out of bounds 崩溃
+    if num_classes < 2:
+        print("\n[!] 🚨 致命错误：当前数据集的有效类别数不足 2 个。")
+        print(
+            "[!] 深度学习分类模型至少需要 2 种不同的流量（如 1种正常流量 + 1种攻击流量）才能进行训练。请上传更多种类的流量包！")
+        return
 
     # 3. 初始化模型
     model = NetVision(num_classes=num_classes).to(args.device)
@@ -79,7 +87,6 @@ def train():
             total_train += labels.size(0)
             correct_train += predicted.eq(labels).sum().item()
 
-            # --- 修改后的打印逻辑 ---
             if (i + 1) % args.log_interval == 0:
                 print(f'Epoch [{epoch + 1:2d}/{args.epochs}] | Step [{i + 1:5d}/{len(train_loader)}] | '
                       f'Loss: {loss.item():.4f} | Train Acc: {100. * correct_train / total_train:.2f}%')
@@ -122,8 +129,14 @@ def train():
         if val_acc > best_acc:
             best_acc = val_acc
             save_path = f'checkpoints/netvision_{safe_dataset_name}.pth'
-            torch.save(model.state_dict(), save_path)
-            print(f'    [+] 发现最佳模型 (Val Acc: {best_acc:.2f}%)，权重已保存。')
+
+            # 【优化点 3】：将权重和当前数据集的全局类别名单一起打包保存
+            checkpoint = {
+                'state_dict': model.state_dict(),
+                'classes': train_dataset.unique_labels
+            }
+            torch.save(checkpoint, save_path)
+            print(f'    [+] 发现最佳模型 (Val Acc: {best_acc:.2f}%)，权重与类别名单已保存。')
 
     print(f"\n[*] 训练任务完成! 最终最佳测试集准确率: {best_acc:.2f}%")
 
