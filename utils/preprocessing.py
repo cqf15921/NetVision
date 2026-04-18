@@ -155,20 +155,31 @@ class NetVisionPreprocessor:
         valid_indices = np.isin(labels, valid_labels)
         images, labels = images[valid_indices], labels[valid_indices]
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            images, labels, test_size=0.2, random_state=42, stratify=labels
-        )
+        # ==== 【修复隐患 1】：防崩溃保护，如果只有 1 个类别，取消分层抽样 ====
+        if len(valid_labels) < 2:
+            print("    [!] 注意：当前提取到的流量类别少于 2 种，自动取消分层抽样 (Stratify)。")
+            # 如果样本极端少（<=1个），直接全部作为测试/训练集防止报错
+            if len(images) <= 1:
+                X_train, X_test, y_train, y_test = np.array(images), np.array(images), np.array(labels), np.array(labels)
+            else:
+                X_train, X_test, y_train, y_test = train_test_split(
+                    images, labels, test_size=0.2, random_state=42
+                )
+        else:
+            X_train, X_test, y_train, y_test = train_test_split(
+                images, labels, test_size=0.2, random_state=42, stratify=labels
+            )
 
         train_path = self.output_idx_path.replace('.npz', '_train.npz')
         test_path = self.output_idx_path.replace('.npz', '_test.npz')
 
-        # ==== 核心 Bug 修复：增加 classes=valid_labels 记录全局类别名单 ====
+        # 记录全局类别名单
         np.savez_compressed(train_path, images=X_train, labels=y_train, classes=valid_labels)
         np.savez_compressed(test_path, images=X_test, labels=y_test, classes=valid_labels)
 
         print(f"[+] 最终数据集已保存。")
 
-        # --- 改进：清理冗余中间数据 ---
+        # 清理冗余中间数据
         try:
             print(f"[*] 正在清理临时缓存目录: {self.temp_dir} ...")
             shutil.rmtree(self.temp_dir, ignore_errors=True)

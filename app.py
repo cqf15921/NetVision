@@ -57,6 +57,12 @@ def run_preprocessing(upload_dir, default_dataset, max_packets):
             yield "❌ 错误：选择了【无】规范时，必须上传包含流量包的文件夹！\n"
             return
         target_ds = "User_Dataset"  # 为用户自定义上传的数据集分配统一内部名称
+
+        # ==== 【修复隐患 2】：清空旧的自定义数据和缓存，防止数据无限叠加和同名文件被跳过 ====
+        raw_dir = f"data/raw/{target_ds}"
+        temp_cache = f"data/processed/temp_{target_ds}"
+        shutil.rmtree(raw_dir, ignore_errors=True)
+        shutil.rmtree(temp_cache, ignore_errors=True)
     else:
         target_ds = default_dataset
 
@@ -127,7 +133,7 @@ def get_latest_model(dataset_choice):
 def run_detection(test_file, model_file, dataset_choice):
     """执行检测，并确保可视化结果实时刷新"""
 
-    # 【优化点 1】启动前清理旧的评估结果图片，防止旧图残留误导用户
+    # 启动前清理旧的评估结果图片，防止旧图残留误导用户
     for img_file in ["results/confusion_matrix.png", "results/metrics_bar.png"]:
         if os.path.exists(img_file):
             try:
@@ -236,7 +242,6 @@ with gr.Blocks(title="NetVision 物联网恶意流量检测系统", theme=theme)
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### 配置检测环境")
-                # 【优化点 2】修正 UI 引导语，明确要求上传预处理后的 .npz 文件
                 upload_test = gr.File(label="上传待检测的流量特征集 (.npz)")
                 upload_weight = gr.File(label="上传自定义权重 (.pth)")
                 target_env = gr.Dropdown(
