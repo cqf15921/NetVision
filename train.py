@@ -16,7 +16,7 @@ def train():
     parser.add_argument('--dataset', type=str, default='CIC_IoT_2023',
                         help='选择要训练的数据集名称')
     parser.add_argument('--model_type', type=str, default='netvision',
-                        choices=['netvision', 'ghostnet', 'shufflenet', '1dcnn'],
+                        choices=['netvision', 'ghostnet', 'shufflenet', '1dcnn', 'noghost', 'resnet'],
                         help='选择要训练的模型架构')
     parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
     parser.add_argument('--lr', type=float, default=0.001, help='初始学习率')
@@ -65,8 +65,17 @@ def train():
     elif args.model_type == '1dcnn':
         from models.cnn1d_model import CNN1D
         model = CNN1D(num_classes=num_classes).to(args.device)
+    elif args.model_type == 'noghost':
+        # 从 noghost_model 导入并起别名
+        from models.noghost_model import NetVision as NoGhostNet
+        model = NoGhostNet(num_classes=num_classes).to(args.device)
+    elif args.model_type == 'resnet':
+        # 从 resnet_model 导入并起别名
+        from models.resnet_model import NetVision as ResNetModel
+        model = ResNetModel(num_classes=num_classes).to(args.device)
     else:
-        # 默认使用原版 NetVision
+        # 默认原版 NetVision
+        from models.netvision_model import NetVision
         model = NetVision(num_classes=num_classes).to(args.device)
 
     # 4. 优化策略

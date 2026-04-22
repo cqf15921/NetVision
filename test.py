@@ -66,7 +66,7 @@ def test():
                         help='选择要评估的数据集')
 
     parser.add_argument('--model_type', type=str, default='netvision',
-                        choices=['netvision', 'ghostnet', 'shufflenet', '1dcnn'],
+                        choices=['netvision', 'ghostnet', 'shufflenet', '1dcnn', 'noghost', 'resnet'],
                         help='选择要评估的模型架构')
 
     parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
@@ -144,7 +144,14 @@ def test():
     elif args.model_type == '1dcnn':
         from models.cnn1d_model import CNN1D
         model = CNN1D(num_classes=num_classes).to(args.device)
+    elif args.model_type == 'noghost':
+        from models.noghost_model import NetVision as NoGhostNet
+        model = NoGhostNet(num_classes=num_classes).to(args.device)
+    elif args.model_type == 'resnet':
+        from models.resnet_model import NetVision as ResNetModel
+        model = ResNetModel(num_classes=num_classes).to(args.device)
     else:
+        from models.netvision_model import NetVision
         model = NetVision(num_classes=num_classes).to(args.device)
 
     # =====================================================================
