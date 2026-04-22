@@ -15,6 +15,9 @@ def train():
     # 【优化点 1】：删除了 choices 限制，允许接收来自 UI 界面的 "User_Dataset"
     parser.add_argument('--dataset', type=str, default='CIC_IoT_2023',
                         help='选择要训练的数据集名称')
+    parser.add_argument('--model_type', type=str, default='netvision',
+                        choices=['netvision', 'ghostnet', 'shufflenet', '1dcnn'],
+                        help='选择要训练的模型架构')
     parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
     parser.add_argument('--lr', type=float, default=0.001, help='初始学习率')
     parser.add_argument('--epochs', type=int, default=15, help='训练轮数')
@@ -51,8 +54,20 @@ def train():
             "[!] 深度学习分类模型至少需要 2 种不同的流量（如 1种正常流量 + 1种攻击流量）才能进行训练。请上传更多种类的流量包！")
         return
 
-    # 3. 初始化模型
-    model = NetVision(num_classes=num_classes).to(args.device)
+    # 3. 动态初始化模型
+    print(f"[*] 正在加载 {args.model_type.upper()} 模型架构...")
+    if args.model_type == 'ghostnet':
+        from models.ghostnet_model import GhostNet
+        model = GhostNet(num_classes=num_classes).to(args.device)
+    elif args.model_type == 'shufflenet':
+        from models.shufflenet_model import ShuffleNetV2
+        model = ShuffleNetV2(num_classes=num_classes).to(args.device)
+    elif args.model_type == '1dcnn':
+        from models.cnn1d_model import CNN1D
+        model = CNN1D(num_classes=num_classes).to(args.device)
+    else:
+        # 默认使用原版 NetVision
+        model = NetVision(num_classes=num_classes).to(args.device)
 
     # 4. 优化策略
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -128,7 +143,7 @@ def train():
         # ====================
         if val_acc > best_acc:
             best_acc = val_acc
-            save_path = f'checkpoints/netvision_{safe_dataset_name}.pth'
+            save_path = f'checkpoints/{args.model_type}_{safe_dataset_name}.pth'
 
             # 【优化点 3】：将权重和当前数据集的全局类别名单一起打包保存
             checkpoint = {

@@ -65,6 +65,10 @@ def test():
     parser.add_argument('--dataset', type=str, default='USTC_TFC2016',
                         help='选择要评估的数据集')
 
+    parser.add_argument('--model_type', type=str, default='netvision',
+                        choices=['netvision', 'ghostnet', 'shufflenet', '1dcnn'],
+                        help='选择要评估的模型架构')
+
     parser.add_argument('--batch_size', type=int, default=64, help='批次大小')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -84,7 +88,7 @@ def test():
     else:
         print(f"=== 开始在 {args.dataset} 上评估 NetVision ===")
         safe_dataset_name = args.dataset.lower().replace('-', '_')
-        model_path = f'./checkpoints/netvision_{safe_dataset_name}.pth'
+        model_path = f'./checkpoints/{args.model_type}_{safe_dataset_name}.pth'
         eval_target_name = args.dataset
 
     if not os.path.exists(model_path):
@@ -131,16 +135,17 @@ def test():
     # ==========================================
     # 4. 初始化并注入模型
     # ==========================================
-    model = NetVision(num_classes=num_classes).to(args.device)
-
-    try:
-        model.load_state_dict(state_dict)
-        print(f"[*] 成功加载模型权重: {model_path}")
-    except RuntimeError as e:
-        print(f"\n[!] 模型结构崩溃！当前测试集包含 {num_classes} 个分类，但上传的权重架构与之不匹配。\n详细错误: {e}")
-        return
-
-    model.eval()
+    if args.model_type == 'ghostnet':
+        from models.ghostnet_model import GhostNet
+        model = GhostNet(num_classes=num_classes).to(args.device)
+    elif args.model_type == 'shufflenet':
+        from models.shufflenet_model import ShuffleNetV2
+        model = ShuffleNetV2(num_classes=num_classes).to(args.device)
+    elif args.model_type == '1dcnn':
+        from models.cnn1d_model import CNN1D
+        model = CNN1D(num_classes=num_classes).to(args.device)
+    else:
+        model = NetVision(num_classes=num_classes).to(args.device)
 
     # =====================================================================
     # 5. 计算模型的学术指标：FLOPs (计算复杂度) 和 Parameters (参数量)
