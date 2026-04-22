@@ -51,7 +51,13 @@ class NetVisionPreprocessor:
 
         for file_path in pcap_files:
             base_name = os.path.basename(file_path)
-            label_name = os.path.splitext(base_name)[0]
+
+            # USTC_TFC2016 的父目录只有 Malware 和 Benign 两个，因此必须继续使用文件名作为标签
+            if self.dataset_name == 'USTC_TFC2016':
+                label_name = os.path.splitext(base_name)[0]
+            else:
+                # 对于 CIC_IoT_2023 和 ToN-IoT，使用文件所在的上一级目录名作为真实标签
+                label_name = os.path.basename(os.path.dirname(file_path))
 
             # 最终路径
             temp_file_path = os.path.join(self.temp_dir, f"{label_name}_{base_name}.npz")
