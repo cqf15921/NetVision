@@ -44,7 +44,7 @@ class ResBlock(nn.Module):
         return out
 
 
-class NetVision_Ablation(nn.Module):
+class NetVision(nn.Module):
     """
     NetVision 的消融实验版本
     移除了轻量化的 LRBBlock (基于 GhostModule 和 Channel Shuffle)，
@@ -52,7 +52,7 @@ class NetVision_Ablation(nn.Module):
     """
 
     def __init__(self, num_classes=8):
-        super(NetVision_Ablation, self).__init__()
+        super(NetVision, self).__init__()
         # 初始卷积层保持不变
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1, stride=2),
