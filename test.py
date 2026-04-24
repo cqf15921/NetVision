@@ -155,6 +155,9 @@ def test():
         from models.netvision_model import NetVision
         model = NetVision(num_classes=num_classes).to(args.device)
 
+    model.load_state_dict(state_dict)
+    model.eval()
+
     # =====================================================================
     # 5. 计算模型的学术指标：FLOPs (计算复杂度) 和 Parameters (参数量)
     # =====================================================================

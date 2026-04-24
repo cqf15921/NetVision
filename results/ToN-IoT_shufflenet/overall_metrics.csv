@@ -1,0 +1,2 @@
+Dataset,Model,Accuracy(%),Precision(%),Recall(%),F1-Score(%),FLOPs(M),Params(K),Inference_Time(s),Flows_per_second
+ToN-IoT,shufflenet,95.67,81.21,80.35,80.14,0.53,67.47,1.25,12972.86

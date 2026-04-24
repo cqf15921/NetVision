@@ -1,0 +1,14 @@
+Class,Precision,Recall,F1-Score,Support
+Injection_normal,0.8689,0.8523,0.8605,684.0
+MITM_normal,0.6050,0.6526,0.6279,331.0
+normal_DDoS,0.9920,0.9881,0.9901,5141.0
+normal_DoS,0.9200,0.8364,0.8762,110.0
+normal_XSS,0.9884,0.9695,0.9788,2457.0
+normal_backdoor,0.6111,0.3642,0.4564,151.0
+normal_pcaps,0.7000,0.6923,0.6961,91.0
+normal_runsomware,0.4600,0.7992,0.5839,259.0
+normal_scanning,0.9971,0.9933,0.9952,5928.0
+password_normal,0.9459,0.9090,0.9271,1077.0
+accuracy,,,0.9579,
+macro avg,0.8088,0.8057,0.7992,16229.0
+weighted avg,0.9630,0.9579,0.9593,16229.0

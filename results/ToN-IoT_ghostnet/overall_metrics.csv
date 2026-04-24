@@ -1,0 +1,2 @@
+Dataset,Model,Accuracy(%),Precision(%),Recall(%),F1-Score(%),FLOPs(M),Params(K),Inference_Time(s),Flows_per_second
+ToN-IoT,ghostnet,95.79,80.88,80.57,79.92,0.68,52.73,1.62,9989.65

@@ -1,0 +1,2 @@
+Dataset,Model,Accuracy(%),Precision(%),Recall(%),F1-Score(%),FLOPs(M),Params(K),Inference_Time(s),Flows_per_second
+USTC_TFC2016,shufflenet,98.74,97.42,97.35,97.38,0.53,69.78,1.54,11899.65

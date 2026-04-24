@@ -1,0 +1,2 @@
+Dataset,Model,Accuracy(%),Precision(%),Recall(%),F1-Score(%),FLOPs(M),Params(K),Inference_Time(s),Flows_per_second
+CIC_IoT_2023,shufflenet,91.92,84.12,82.45,82.87,0.53,67.72,1.20,11562.79

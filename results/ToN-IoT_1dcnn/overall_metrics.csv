@@ -1,0 +1,2 @@
+Dataset,Model,Accuracy(%),Precision(%),Recall(%),F1-Score(%),FLOPs(M),Params(K),Inference_Time(s),Flows_per_second
+ToN-IoT,1dcnn,95.14,78.66,77.85,76.78,3.65,71.37,0.87,18719.73
